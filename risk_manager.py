@@ -78,10 +78,31 @@ class RiskManager:
     # --- sizing ---
 
     def calculate_position_size(self, confidence: float, entry_price: float) -> float:
-        """Returns USDC size for the order. 0 if should skip."""
+        """Returns USDC size for the order. 0 if should skip.
+
+        Flat $1 for the first CONFIG.kelly_enable_after resolved trades
+        (signal validation phase). Kelly 0.25 thereafter.
+        """
         if entry_price <= 0 or entry_price >= 1.0:
             return 0.0
-        # Kelly: b*p - q / b, where b = (1/price - 1)
+
+        # Flat-bet phase: fixed $1 while we validate the signal
+        if self.state.total_trades < CONFIG.kelly_enable_after:
+            b = (1.0 / entry_price) - 1.0
+            if b <= 0:
+                return 0.0
+            p = confidence
+            q = 1.0 - p
+            kelly_pct = (b * p - q) / b
+            # Use same EV gate as Kelly phase: skip if the fraction would produce no bet
+            if kelly_pct * CONFIG.kelly_fraction * max(0.0, self.state.current_balance - CONFIG.min_reserve) < CONFIG.min_bet_size:
+                return 0.0
+            available = max(0.0, self.state.current_balance - CONFIG.min_reserve)
+            if available < 1.0:
+                return 0.0
+            return 1.0
+
+        # Kelly phase
         b = (1.0 / entry_price) - 1.0
         if b <= 0:
             return 0.0
@@ -164,6 +185,7 @@ def _run_tests() -> None:
 
     # Sizing: max bet cap
     rm2 = RiskManager(starting_balance=1000.0)
+    rm2.state.total_trades = CONFIG.kelly_enable_after
     size2 = rm2.calculate_position_size(0.95, 0.90)
     print(f"size(conf=0.95, price=0.90, bal=$1000) = ${size2} (capped at ${CONFIG.max_bet_size})")
     assert size2 == CONFIG.max_bet_size
