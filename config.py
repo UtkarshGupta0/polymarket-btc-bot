@@ -51,6 +51,8 @@ class Config:
     max_consecutive_losses: int
     min_reserve: float
     kelly_fraction: float
+    reprice_interval_sec: int
+    kelly_enable_after: int
 
     # Telegram
     telegram_bot_token: str
@@ -118,6 +120,8 @@ def load_config() -> Config:
         max_consecutive_losses=_get_int("MAX_CONSECUTIVE_LOSSES", 5),
         min_reserve=_get_float("MIN_RESERVE", 5.0),
         kelly_fraction=_get_float("KELLY_FRACTION", 0.25),
+        reprice_interval_sec=_get_int("REPRICE_INTERVAL_SEC", 5),
+        kelly_enable_after=_get_int("KELLY_ENABLE_AFTER", 100),
         telegram_bot_token=_get_str("TELEGRAM_BOT_TOKEN"),
         telegram_chat_id=_get_str("TELEGRAM_CHAT_ID"),
         anthropic_api_key=_get_str("ANTHROPIC_API_KEY"),
