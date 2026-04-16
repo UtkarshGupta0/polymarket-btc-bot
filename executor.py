@@ -109,6 +109,26 @@ class PaperExecutor:
         )
         return trade
 
+    def pending_trade(self, window_ts: int) -> Optional[Trade]:
+        return self._active_trades.get(window_ts)
+
+    def reprice(self, window_ts: int, new_price: float) -> Optional[Trade]:
+        old = self._active_trades.get(window_ts)
+        if old is None:
+            return None
+        self._traded_windows.discard(window_ts)
+        del self._active_trades[window_ts]
+        return self.place_order(
+            window_ts=window_ts,
+            direction=old.direction,
+            confidence=old.confidence,
+            entry_price=new_price,
+            size_usdc=old.size_usdc,
+            token_id=old.token_id,
+            btc_open=old.btc_open,
+            seconds_to_close=old.seconds_to_close_at_entry,
+        )
+
     def resolve_trade(self, window_ts: int, btc_close: float) -> Optional[Trade]:
         trade = self._active_trades.get(window_ts)
         if trade is None:
@@ -330,6 +350,31 @@ class LiveExecutor:
             if self.cancel_order(trade.order_id):
                 trade.status = "CANCELLED"
                 logger.info(f"[live] cancelled unfilled order {trade.order_id}")
+
+    def pending_trade(self, window_ts: int) -> Optional[Trade]:
+        return self._active_trades.get(window_ts)
+
+    def reprice(self, window_ts: int, new_price: float) -> Optional[Trade]:
+        old = self._active_trades.get(window_ts)
+        if old is None:
+            return None
+        if old.order_id:
+            ok = self.cancel_order(old.order_id)
+            if not ok:
+                logger.warning(f"reprice: cancel failed for {old.order_id}, skipping replace")
+                return None
+        self._traded_windows.discard(window_ts)
+        del self._active_trades[window_ts]
+        return self.place_order(
+            window_ts=window_ts,
+            direction=old.direction,
+            confidence=old.confidence,
+            entry_price=new_price,
+            size_usdc=old.size_usdc,
+            token_id=old.token_id,
+            btc_open=old.btc_open,
+            seconds_to_close=old.seconds_to_close_at_entry,
+        )
 
     def cancel_all(self) -> None:
         try:
