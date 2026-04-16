@@ -89,13 +89,7 @@ class RiskManager:
         # Flat-bet phase: fixed $1 while we validate the signal
         if self.state.total_trades < CONFIG.kelly_enable_after:
             b = (1.0 / entry_price) - 1.0
-            if b <= 0:
-                return 0.0
-            p = confidence
-            q = 1.0 - p
-            kelly_pct = (b * p - q) / b
-            # Use same EV gate as Kelly phase: skip if the fraction would produce no bet
-            if kelly_pct * CONFIG.kelly_fraction * max(0.0, self.state.current_balance - CONFIG.min_reserve) < CONFIG.min_bet_size:
+            if b <= 0 or (b * confidence - (1.0 - confidence)) < 1e-9:
                 return 0.0
             available = max(0.0, self.state.current_balance - CONFIG.min_reserve)
             if available < 1.0:
