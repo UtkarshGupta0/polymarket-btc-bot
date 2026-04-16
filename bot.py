@@ -10,7 +10,7 @@ from typing import Optional
 from config import CONFIG
 from price_feed import PriceFeed
 from market_finder import MarketFinder, MarketWindow, get_current_window_start, INTERVAL_5M
-from signal_engine import compute_signal, should_trade
+from signal_engine import compute_signal
 from risk_manager import RiskManager
 from executor import PaperExecutor, Trade, build_executor
 from trade_logger import TradeLogger
@@ -40,6 +40,7 @@ class Bot:
         self.pending_trade: Optional[Trade] = None
         self._running = False
         self._orderbook_fetched_at: float = 0.0
+        self._last_reprice_ts: float = 0.0
         self._last_day_utc = self.risk_manager.state.day_utc
 
     # --- lifecycle ---
@@ -161,21 +162,25 @@ class Bot:
             # New window setup
             await self._on_new_window(current_start)
 
-        # 2. ENTRY WINDOW — try to place a trade
+        # 2. ENTRY WINDOW — evaluate every REPRICE_INTERVAL_SEC
         in_entry_window = (
             CONFIG.entry_window_end < seconds_remaining <= CONFIG.entry_window_start
         )
-        if in_entry_window and self.pending_trade is None \
-                and not self.executor.has_traded(current_start):
-            await self._maybe_place_trade(current_start, window_end, seconds_remaining)
+        if in_entry_window:
+            now_ts = time.time()
+            if now_ts - self._last_reprice_ts >= CONFIG.reprice_interval_sec:
+                self._last_reprice_ts = now_ts
+                await self._evaluate_entry(current_start, window_end, seconds_remaining)
 
-        # 2b. Live mode — periodic order status refresh + late-window cancel
-        if self.pending_trade is not None and CONFIG.trading_mode == "live":
-            if hasattr(self.executor, "refresh_trade_status"):
+        # 2b. Hard cancel at T-3s (any mode) + live status refresh
+        if self.pending_trade is not None:
+            if CONFIG.trading_mode == "live" and hasattr(self.executor, "refresh_trade_status"):
                 self.executor.refresh_trade_status(self.pending_trade.window_ts)
-            if seconds_remaining <= 3 and self.pending_trade.status in ("LIVE", "PLACED"):
-                if hasattr(self.executor, "cancel_pending_if_unfilled"):
+            if seconds_remaining <= 3:
+                if CONFIG.trading_mode == "live" and hasattr(self.executor, "cancel_pending_if_unfilled"):
                     self.executor.cancel_pending_if_unfilled(self.pending_trade.window_ts)
+                self.pending_trade = None
+                logger.info(f"T-3s cancel sweep for window {current_start}")
 
         # 3. WINDOW CLOSE — resolution handled at top of next tick when window_ts changes.
         # But if we've got a pending trade and we've crossed close, resolve here too.
@@ -225,6 +230,7 @@ class Bot:
         self.last_window_ts = window_start
         self.pending_trade = None
         self._orderbook_fetched_at = 0.0
+        self._last_reprice_ts = 0.0
 
         # Kick off market data fetch in background (don't block loop)
         asyncio.create_task(self._fetch_market_async(window_start))
@@ -255,23 +261,15 @@ class Bot:
         except Exception as e:
             logger.warning(f"orderbook refresh: {e}")
 
-    async def _maybe_place_trade(
+    async def _evaluate_entry(
         self, window_start: int, window_end: int, seconds_remaining: float
     ) -> None:
-        signal = compute_signal(self.price_feed.state, window_end)
-        if signal is None:
-            return
-        # Log signal once per second in entry window
-        now = time.time()
-        if not hasattr(self, "_last_signal_log") or now - self._last_signal_log >= 5.0:
-            self._last_signal_log = now
-            logger.info(f"signal | {signal.rationale} EV={signal.expected_value:+.4f}")
-        if not should_trade(signal):
-            return
+        """One reprice tick: compute signal, fetch book, place/reprice/cancel."""
+        from signal_engine import gate_vs_market
 
+        # 1. Risk halt
         can, reason = self.risk_manager.can_trade()
         if not can:
-            logger.info(f"risk gate: {reason}")
             if not self._risk_pause_alerted and (
                 self.risk_manager.state.max_drawdown_hit
                 or self.risk_manager.state.consecutive_losses
@@ -281,52 +279,92 @@ class Bot:
                 asyncio.create_task(self.telegram.risk_paused(reason))
             return
 
-        size = self.risk_manager.calculate_position_size(
-            signal.confidence, signal.suggested_price
-        )
-        if size <= 0:
+        # 2. Fresh signal
+        sig = compute_signal(self.price_feed.state, window_end)
+        if sig is None:
             return
 
-        # Need token IDs
+        # Log signal periodically
+        now = time.time()
+        if not hasattr(self, "_last_signal_log") or now - self._last_signal_log >= 5.0:
+            self._last_signal_log = now
+            logger.info(f"signal | {sig.rationale}")
+
+        # 3. Ensure market data available
         if self.current_window is None or \
                 not self.current_window.up_token_id or \
                 not self.current_window.down_token_id:
-            logger.info(f"market tokens not ready for {window_start}; skip")
             return
 
-        # Refresh orderbook to avoid becoming a taker (price >= best ask)
+        # 4. Refresh orderbook
         await self._refresh_orderbook_if_stale()
         mw = self.current_window
-        best_ask = mw.up_best_ask if signal.direction == "UP" else mw.down_best_ask
-        entry_price = signal.suggested_price
-        if best_ask is not None and entry_price >= best_ask:
-            adjusted = round(best_ask - 0.01, 2)
-            logger.info(
-                f"price ${entry_price} >= best_ask ${best_ask}; adjusting to ${adjusted} "
-                "to stay maker"
-            )
-            entry_price = adjusted
-            if entry_price < 0.5:
-                logger.info("adjusted price too low, skipping")
-                return
+        ask_up = mw.up_best_ask or 0.0
+        ask_down = mw.down_best_ask or 0.0
 
-        token_id = mw.up_token_id if signal.direction == "UP" else mw.down_token_id
-        trade = self.executor.place_order(
-            window_ts=window_start,
-            direction=signal.direction,
-            confidence=signal.confidence,
-            entry_price=entry_price,
-            size_usdc=size,
-            token_id=token_id,
-            btc_open=self.price_feed.state.window_open_price,
-            seconds_to_close=seconds_remaining,
-        )
-        if trade is None:
+        active = self.executor.pending_trade(window_start)
+
+        # 5. Gate: conf must beat market ask for predicted side
+        if not gate_vs_market(sig, ask_up=ask_up, ask_down=ask_down):
+            if active is not None:
+                logger.info(
+                    f"edge gone: conf={sig.confidence:.2f} dir={sig.direction} "
+                    f"ask_up={ask_up:.2f} ask_down={ask_down:.2f} — canceling"
+                )
+                if CONFIG.trading_mode == "live" and hasattr(self.executor, "cancel_pending_if_unfilled"):
+                    self.executor.cancel_pending_if_unfilled(window_start)
+                self.pending_trade = None
             return
-        self.pending_trade = trade
-        self.risk_manager.on_trade_placed(trade.size_usdc)
-        logger.info(f"TRADE PLACED | {signal.rationale}")
-        asyncio.create_task(self.telegram.trade_placed(trade))
+
+        # 6. Target price = ask_of_side - 0.01
+        side_ask = ask_up if sig.direction == "UP" else ask_down
+        target_price = round(max(0.02, side_ask - 0.01), 2)
+        side_token = mw.up_token_id if sig.direction == "UP" else mw.down_token_id
+
+        # 7. Direction flip => cancel and skip this tick
+        if active is not None and active.direction != sig.direction:
+            logger.info(f"direction flip {active.direction}->{sig.direction}, cancel")
+            if CONFIG.trading_mode == "live" and hasattr(self.executor, "cancel_pending_if_unfilled"):
+                self.executor.cancel_pending_if_unfilled(window_start)
+            self.pending_trade = None
+            return
+
+        # 8. Size
+        size = self.risk_manager.calculate_position_size(sig.confidence, target_price)
+        if size <= 0:
+            return
+
+        # 9. Place new or reprice existing
+        if active is None:
+            trade = self.executor.place_order(
+                window_ts=window_start,
+                direction=sig.direction,
+                confidence=sig.confidence,
+                entry_price=target_price,
+                size_usdc=size,
+                token_id=side_token,
+                btc_open=self.price_feed.state.window_open_price,
+                seconds_to_close=seconds_remaining,
+            )
+            if trade is not None:
+                self.pending_trade = trade
+                self.risk_manager.on_trade_placed(trade.size_usdc)
+                logger.info(
+                    f"PLACED {sig.direction} @ ${target_price} "
+                    f"conf={sig.confidence:.2f} size=${size}"
+                )
+                asyncio.create_task(self.telegram.trade_placed(trade))
+            return
+
+        # Only reprice if price moved >= 1c
+        if abs(active.entry_price - target_price) >= 0.01:
+            logger.info(
+                f"REPRICE {active.direction} ${active.entry_price}->${target_price} "
+                f"conf={sig.confidence:.2f}"
+            )
+            new_trade = self.executor.reprice(window_start, new_price=target_price)
+            if new_trade is not None:
+                self.pending_trade = new_trade
 
     async def _resolve_previous_trade(self) -> None:
         trade = self.pending_trade
