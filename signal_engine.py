@@ -207,6 +207,8 @@ def should_trade(signal: Signal) -> bool:
 def gate_vs_market(signal: Signal, ask_up: float, ask_down: float) -> bool:
     if signal.seconds_to_close < 5:
         return False
+    if signal.confidence < CONFIG.min_confidence:
+        return False
     ask = ask_up if signal.direction == "UP" else ask_down
     if ask <= 0:
         return False

@@ -41,6 +41,7 @@ class Bot:
         self._running = False
         self._orderbook_fetched_at: float = 0.0
         self._last_reprice_ts: float = 0.0
+        self._last_signal_log: float = 0.0
         self._last_day_utc = self.risk_manager.state.day_utc
 
     # --- lifecycle ---
@@ -177,8 +178,11 @@ class Bot:
             if CONFIG.trading_mode == "live" and hasattr(self.executor, "refresh_trade_status"):
                 self.executor.refresh_trade_status(self.pending_trade.window_ts)
             if seconds_remaining <= 3:
-                if CONFIG.trading_mode == "live" and hasattr(self.executor, "cancel_pending_if_unfilled"):
-                    self.executor.cancel_pending_if_unfilled(self.pending_trade.window_ts)
+                trade = self.pending_trade
+                self.executor.cancel_pending_if_unfilled(trade.window_ts)
+                self.risk_manager.on_trade_resolved(
+                    won=False, payout_usdc=trade.size_usdc, pnl=0.0, skipped=True
+                )
                 self.pending_trade = None
                 logger.info(f"T-3s cancel sweep for window {current_start}")
 
@@ -286,7 +290,7 @@ class Bot:
 
         # Log signal periodically
         now = time.time()
-        if not hasattr(self, "_last_signal_log") or now - self._last_signal_log >= 5.0:
+        if now - self._last_signal_log >= 5.0:
             self._last_signal_log = now
             logger.info(f"signal | {sig.rationale}")
 
@@ -311,8 +315,10 @@ class Bot:
                     f"edge gone: conf={sig.confidence:.2f} dir={sig.direction} "
                     f"ask_up={ask_up:.2f} ask_down={ask_down:.2f} — canceling"
                 )
-                if CONFIG.trading_mode == "live" and hasattr(self.executor, "cancel_pending_if_unfilled"):
-                    self.executor.cancel_pending_if_unfilled(window_start)
+                self.executor.cancel_pending_if_unfilled(window_start)
+                self.risk_manager.on_trade_resolved(
+                    won=False, payout_usdc=active.size_usdc, pnl=0.0, skipped=True
+                )
                 self.pending_trade = None
             return
 
@@ -324,8 +330,10 @@ class Bot:
         # 7. Direction flip => cancel and skip this tick
         if active is not None and active.direction != sig.direction:
             logger.info(f"direction flip {active.direction}->{sig.direction}, cancel")
-            if CONFIG.trading_mode == "live" and hasattr(self.executor, "cancel_pending_if_unfilled"):
-                self.executor.cancel_pending_if_unfilled(window_start)
+            self.executor.cancel_pending_if_unfilled(window_start)
+            self.risk_manager.on_trade_resolved(
+                won=False, payout_usdc=active.size_usdc, pnl=0.0, skipped=True
+            )
             self.pending_trade = None
             return
 

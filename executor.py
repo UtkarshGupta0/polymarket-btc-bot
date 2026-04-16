@@ -163,6 +163,14 @@ class PaperExecutor:
         )
         return trade
 
+    def cancel_pending_if_unfilled(self, window_ts: int) -> None:
+        """Cancel an unfilled paper trade. Removes from active + dedup so re-entry is possible."""
+        trade = self._active_trades.pop(window_ts, None)
+        if trade is not None:
+            self._traded_windows.discard(window_ts)
+            trade.status = "CANCELLED"
+            logger.info(f"[paper] cancelled unfilled order for window {window_ts}")
+
     def forget_window(self, window_ts: int) -> None:
         """Remove trade from active map (after logging). Keep dedup set."""
         self._active_trades.pop(window_ts, None)
