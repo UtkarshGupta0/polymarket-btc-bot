@@ -91,6 +91,28 @@ def regime_split(trades) -> tuple[list[dict], list[dict]]:
     return train, test
 
 
+def _fmt_row(label: str, s: dict) -> str:
+    if s["n"] == 0:
+        return f"{label:<10}   0      -         -           -"
+    return (
+        f"{label:<10} {s['n']:>4}   {s['wr']*100:>5.1f}%  "
+        f"{s['pnl_total']:>+8.2f}   {s['pnl_per_trade']:>+7.3f}"
+    )
+
+
+def analysis_a(trades: list[dict]) -> None:
+    kept = [t for t in trades if gate_pass(t, active=set(GATES))]
+    removed = [t for t in trades if not gate_pass(t, active=set(GATES))]
+
+    print()
+    print("=== Analysis A: counterfactual stack (all 4 gates) ===")
+    print(f"{'':<10} {'n':>4}   {'WR':>5}   {'PnL':>8}   {'$/trade':>7}")
+    print("-" * 50)
+    print(_fmt_row("BEFORE",  summarize(trades)))
+    print(_fmt_row("AFTER",   summarize(kept)))
+    print(_fmt_row("REMOVED", summarize(removed)))
+
+
 def main() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     trades = load_trades(repo_root / "logs")
