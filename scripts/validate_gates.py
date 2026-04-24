@@ -113,6 +113,31 @@ def analysis_a(trades: list[dict]) -> None:
     print(_fmt_row("REMOVED", summarize(removed)))
 
 
+def _slice_line(label: str, trades: list[dict]) -> str:
+    kept = [t for t in trades if gate_pass(t, active=set(GATES))]
+    b, a = summarize(trades), summarize(kept)
+    dn = a["n"] - b["n"]
+    dwr = (a["wr"] - b["wr"]) * 100
+    dpnl = a["pnl_total"] - b["pnl_total"]
+    return (
+        f"{label:<6} "
+        f"{b['n']:>4} {b['wr']*100:>5.1f}% {b['pnl_total']:>+7.2f}   "
+        f"{a['n']:>4} {a['wr']*100:>5.1f}% {a['pnl_total']:>+7.2f}   "
+        f"{dn:>+4} {dwr:>+5.1f}pp {dpnl:>+7.2f}"
+    )
+
+
+def analysis_b(trades: list[dict]) -> None:
+    train, test = regime_split(trades)
+    print()
+    print("=== Analysis B: regime split (train Apr19-21, test Apr22-23) ===")
+    print(f"{'slice':<6} {'':>21}     {'':>21}     DELTA")
+    print(f"{'':<6} {'BEFORE':>21}  {'AFTER':>21}  {'n':>4} {'WR':>6} {'PnL':>7}")
+    print("-" * 80)
+    print(_slice_line("train", train))
+    print(_slice_line("test",  test))
+
+
 def main() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     trades = load_trades(repo_root / "logs")

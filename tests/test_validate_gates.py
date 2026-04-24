@@ -157,12 +157,31 @@ def test_analysis_a_smoke() -> None:
     assert "4" in out and "2" in out
 
 
+def test_analysis_b_smoke() -> None:
+    import io, contextlib
+    from scripts.validate_gates import analysis_b
+
+    trades = [
+        {"outcome": "WIN",  "confidence": 0.70, "entry_price": 0.60,
+         "time_iso": "2026-04-19T12:00:00+00:00", "delta_pct": 0.0005, "pnl": 2.0},
+        {"outcome": "LOSS", "confidence": 0.50, "entry_price": 0.60,
+         "time_iso": "2026-04-22T12:00:00+00:00", "delta_pct": 0.0005, "pnl": -1.0},
+    ]
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        analysis_b(trades)
+    out = buf.getvalue()
+    assert "train" in out and "test" in out, out
+    assert "BEFORE" in out and "AFTER" in out and ("DELTA" in out or "\u0394" in out), out
+
+
 def run() -> None:
     test_load_trades()
     test_gate_pass()
     test_summarize()
     test_trade_date_and_split()
     test_analysis_a_smoke()
+    test_analysis_b_smoke()
     print("PASS ✓ validate_gates pure fns")
 
 
