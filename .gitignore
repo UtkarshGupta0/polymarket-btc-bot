@@ -34,6 +34,7 @@ docs/superpowers/plans/
 # IDE / OS
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 .DS_Store
