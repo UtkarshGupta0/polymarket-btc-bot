@@ -92,10 +92,53 @@ def test_gate_pass() -> None:
     assert gate_pass(low_conf, active=set())
 
 
+def test_summarize() -> None:
+    from scripts.validate_gates import summarize
+
+    s = summarize([
+        {"outcome": "WIN", "pnl": 2.0},
+        {"outcome": "WIN", "pnl": 3.0},
+        {"outcome": "LOSS", "pnl": -1.0},
+        {"outcome": "LOSS", "pnl": -1.5},
+    ])
+    assert s["n"] == 4
+    assert abs(s["wr"] - 0.50) < 1e-9, s
+    assert abs(s["pnl_total"] - 2.5) < 1e-9, s
+    assert abs(s["pnl_per_trade"] - 0.625) < 1e-9, s
+
+    # Empty is sentinel
+    empty = summarize([])
+    assert empty["n"] == 0
+    assert empty["wr"] == 0.0
+    assert empty["pnl_total"] == 0.0
+    assert empty["pnl_per_trade"] == 0.0
+
+
+def test_trade_date_and_split() -> None:
+    from scripts.validate_gates import _trade_date, regime_split
+
+    t = {"time_iso": "2026-04-19T23:59:00+00:00"}
+    assert _trade_date(t) == "2026-04-19"
+
+    trades = [
+        {"time_iso": "2026-04-18T10:00:00+00:00"},  # excluded
+        {"time_iso": "2026-04-19T10:00:00+00:00"},  # train
+        {"time_iso": "2026-04-20T10:00:00+00:00"},  # train
+        {"time_iso": "2026-04-21T10:00:00+00:00"},  # train
+        {"time_iso": "2026-04-22T10:00:00+00:00"},  # test
+        {"time_iso": "2026-04-23T10:00:00+00:00"},  # test
+    ]
+    train, test = regime_split(trades)
+    assert len(train) == 3, train
+    assert len(test) == 2, test
+
+
 def run() -> None:
     test_load_trades()
     test_gate_pass()
-    print("PASS ✓ validate_gates.{load_trades,gate_pass}")
+    test_summarize()
+    test_trade_date_and_split()
+    print("PASS ✓ validate_gates pure fns")
 
 
 if __name__ == "__main__":

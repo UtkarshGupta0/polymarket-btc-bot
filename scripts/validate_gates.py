@@ -57,6 +57,40 @@ def gate_pass(trade: dict, *, active: set[str]) -> bool:
     return True
 
 
+TRAIN_DATES = {"2026-04-19", "2026-04-20", "2026-04-21"}
+TEST_DATES = {"2026-04-22", "2026-04-23"}
+
+
+def summarize(trades) -> dict:
+    trades = list(trades)
+    n = len(trades)
+    if n == 0:
+        return {"n": 0, "wr": 0.0, "pnl_total": 0.0, "pnl_per_trade": 0.0}
+    wins = sum(1 for t in trades if t["outcome"] == "WIN")
+    pnl_total = sum(t.get("pnl", 0.0) for t in trades)
+    return {
+        "n": n,
+        "wr": wins / n,
+        "pnl_total": pnl_total,
+        "pnl_per_trade": pnl_total / n,
+    }
+
+
+def _trade_date(trade: dict) -> str:
+    return datetime.fromisoformat(trade["time_iso"]).date().isoformat()
+
+
+def regime_split(trades) -> tuple[list[dict], list[dict]]:
+    train, test = [], []
+    for t in trades:
+        d = _trade_date(t)
+        if d in TRAIN_DATES:
+            train.append(t)
+        elif d in TEST_DATES:
+            test.append(t)
+    return train, test
+
+
 def main() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     trades = load_trades(repo_root / "logs")
