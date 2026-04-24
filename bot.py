@@ -283,6 +283,14 @@ class Bot:
                 asyncio.create_task(self.telegram.risk_paused(reason))
             return
 
+        # 1b. Hour-block gate: skip entry if UTC hour blocked AND no active trade.
+        # Active trades bypass so existing positions flow through reprice/cancel logic.
+        if CONFIG.trading_hours_block:
+            from datetime import datetime, timezone
+            if datetime.now(timezone.utc).hour in CONFIG.trading_hours_block:
+                if self.executor.pending_trade(window_start) is None:
+                    return
+
         # 2. Fresh signal
         sig = compute_signal(self.price_feed.state, window_end)
         if sig is None:

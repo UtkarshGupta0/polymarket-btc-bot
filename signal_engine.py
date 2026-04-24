@@ -212,7 +212,11 @@ def gate_vs_market(signal: Signal, ask_up: float, ask_down: float) -> bool:
     ask = ask_up if signal.direction == "UP" else ask_down
     if ask <= 0:
         return False
-    return signal.confidence > ask
+    if signal.confidence - ask < CONFIG.min_edge:
+        return False
+    if abs(signal.window_delta) < CONFIG.min_delta_pct:
+        return False
+    return True
 
 
 # --- standalone test ---

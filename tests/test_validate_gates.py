@@ -51,9 +51,15 @@ def test_load_trades() -> None:
 
 
 def test_gate_pass() -> None:
+    import scripts.validate_gates as vg
+    # Stub the module-level snapshots so test is hermetic (not dependent on .env).
+    vg.MIN_CONFIDENCE = 0.55
+    vg.MIN_EDGE = 0.03
+    vg.TRADING_HOURS_BLOCK = frozenset({0, 2, 3, 20, 21})
+    vg.MIN_DELTA_PCT = 0.0002
     from scripts.validate_gates import gate_pass, GATES
 
-    # Thresholds in this project: MIN_CONFIDENCE=0.55, MIN_EDGE=0.03,
+    # Thresholds for this test: MIN_CONFIDENCE=0.55, MIN_EDGE=0.03,
     # TRADING_HOURS_BLOCK={0,2,3,20,21}, MIN_DELTA_PCT=0.0002.
     # A trade that passes every gate:
     # confidence=0.70, entry_price=0.60 -> edge = 0.70 - 0.61 = 0.09 >= 0.03.

@@ -30,6 +30,20 @@ def _get_int(key: str, default: int) -> int:
     return int(val)
 
 
+def _get_hours_block(key: str, default: frozenset[int]) -> frozenset[int]:
+    val = os.environ.get(key, "").strip()
+    if not val:
+        return default
+    out: set[int] = set()
+    for part in val.split(","):
+        part = part.strip()
+        if part:
+            h = int(part)
+            if 0 <= h <= 23:
+                out.add(h)
+    return frozenset(out)
+
+
 @dataclass(frozen=True)
 class Config:
     # Mode
@@ -54,6 +68,11 @@ class Config:
     reprice_interval_sec: int
     kelly_enable_after: int
 
+    # Gates (dormant by default; enable via .env)
+    min_edge: float
+    min_delta_pct: float
+    trading_hours_block: frozenset[int]
+
     # Telegram
     telegram_bot_token: str
     telegram_chat_id: str
@@ -76,6 +95,13 @@ class Config:
         assert self.max_daily_drawdown > 0
         assert self.max_consecutive_losses > 0
         assert 0 < self.kelly_fraction <= 1
+        assert 0 <= self.min_delta_pct < 0.01, \
+            f"MIN_DELTA_PCT must be 0 <= v < 0.01, got {self.min_delta_pct}"
+        assert 0 <= self.min_edge < 0.5, \
+            f"MIN_EDGE must be 0 <= v < 0.5, got {self.min_edge}"
+        for h in self.trading_hours_block:
+            assert 0 <= h <= 23, \
+                f"TRADING_HOURS_BLOCK entries must be 0-23, got {h}"
         if self.trading_mode == "live":
             assert self.polymarket_private_key, \
                 "POLYMARKET_PRIVATE_KEY required for live mode"
@@ -122,6 +148,9 @@ def load_config() -> Config:
         kelly_fraction=_get_float("KELLY_FRACTION", 0.25),
         reprice_interval_sec=_get_int("REPRICE_INTERVAL_SEC", 5),
         kelly_enable_after=_get_int("KELLY_ENABLE_AFTER", 100),
+        min_edge=_get_float("MIN_EDGE", 0.02),
+        min_delta_pct=_get_float("MIN_DELTA_PCT", 0.0),
+        trading_hours_block=_get_hours_block("TRADING_HOURS_BLOCK", frozenset()),
         telegram_bot_token=_get_str("TELEGRAM_BOT_TOKEN"),
         telegram_chat_id=_get_str("TELEGRAM_CHAT_ID"),
         anthropic_api_key=_get_str("ANTHROPIC_API_KEY"),

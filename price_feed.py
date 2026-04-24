@@ -21,6 +21,8 @@ VWAP_WINDOW_SECONDS = 120
 MOMENTUM_SAMPLE = 10
 PRICE_BUFFER_MAXLEN = 500
 TICK_BUFFER_MAXLEN = 10000
+TREND_WINDOW_SECONDS = 120
+TREND_MIN_BUCKETS = 30
 
 
 @dataclass
@@ -38,6 +40,7 @@ class PriceState:
     volume_imbalance: float = 0.0
     tick_count: int = 0
     last_update: float = 0.0
+    trend_slope_2m: float = 0.0
 
 
 class PriceFeed:
@@ -48,6 +51,8 @@ class PriceFeed:
         # ticks: (timestamp_s, price, qty, is_buy)
         self._ticks: Deque[Tuple[float, float, float, bool]] = deque(
             maxlen=TICK_BUFFER_MAXLEN)
+        # 1-second buckets for trend slope: key = int(ts), value = last price in that second
+        self._buckets: dict[int, float] = {}
         self._task: asyncio.Task | None = None
 
     # --- lifecycle ---
@@ -160,6 +165,15 @@ class PriceFeed:
         self._trim_old_ticks(ts)
         st.vwap = self._compute_vwap()
 
+        # 1s-bucket trend slope over last 120s
+        bucket_key = int(ts)
+        self._buckets[bucket_key] = price
+        cutoff = bucket_key - TREND_WINDOW_SECONDS
+        for k in list(self._buckets.keys()):
+            if k < cutoff:
+                del self._buckets[k]
+        st.trend_slope_2m = self._compute_trend_slope()
+
         # Momentum every 10 ticks
         if st.tick_count % MOMENTUM_SAMPLE == 0 and len(self._prices) >= 2 * MOMENTUM_SAMPLE:
             recent = list(self._prices)[-MOMENTUM_SAMPLE:]
@@ -179,6 +193,26 @@ class PriceFeed:
             num += p * q
             den += q
         return (num / den) if den > 0 else self.state.current_price
+
+    def _compute_trend_slope(self) -> float:
+        if len(self._buckets) < TREND_MIN_BUCKETS:
+            return 0.0
+        open_px = self.state.window_open_price
+        if open_px <= 0:
+            return 0.0
+        t0 = min(self._buckets)
+        n = 0
+        sx = sy = sxx = sxy = 0.0
+        for k, p in self._buckets.items():
+            x = float(k - t0)
+            y = float(p)
+            sx += x; sy += y; sxx += x * x; sxy += x * y
+            n += 1
+        denom = n * sxx - sx * sx
+        if denom == 0:
+            return 0.0
+        slope_price_per_sec = (n * sxy - sx * sy) / denom
+        return slope_price_per_sec / open_px
 
 
 # --- standalone test ---
