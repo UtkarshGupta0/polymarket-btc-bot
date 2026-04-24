@@ -175,6 +175,38 @@ def test_analysis_b_smoke() -> None:
     assert "BEFORE" in out and "AFTER" in out and ("DELTA" in out or "\u0394" in out), out
 
 
+def test_analysis_c_smoke() -> None:
+    import io, contextlib
+    from scripts.validate_gates import analysis_c
+
+    trades = [
+        # Low-conf losers (should get killed by min_confidence)
+        {"outcome": "LOSS", "confidence": 0.50, "entry_price": 0.60,
+         "time_iso": "2026-04-20T12:00:00+00:00", "delta_pct": 0.0005, "pnl": -1.0},
+        {"outcome": "LOSS", "confidence": 0.50, "entry_price": 0.60,
+         "time_iso": "2026-04-20T13:00:00+00:00", "delta_pct": 0.0005, "pnl": -1.0},
+        {"outcome": "LOSS", "confidence": 0.50, "entry_price": 0.60,
+         "time_iso": "2026-04-20T14:00:00+00:00", "delta_pct": 0.0005, "pnl": -1.0},
+        {"outcome": "LOSS", "confidence": 0.50, "entry_price": 0.60,
+         "time_iso": "2026-04-20T15:00:00+00:00", "delta_pct": 0.0005, "pnl": -1.0},
+        {"outcome": "LOSS", "confidence": 0.50, "entry_price": 0.60,
+         "time_iso": "2026-04-20T16:00:00+00:00", "delta_pct": 0.0005, "pnl": -1.0},
+        # High-conf winners (should survive all gates)
+        {"outcome": "WIN",  "confidence": 0.75, "entry_price": 0.60,
+         "time_iso": "2026-04-20T17:00:00+00:00", "delta_pct": 0.0005, "pnl": 2.0},
+        {"outcome": "WIN",  "confidence": 0.75, "entry_price": 0.60,
+         "time_iso": "2026-04-20T18:00:00+00:00", "delta_pct": 0.0005, "pnl": 2.0},
+    ]
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        analysis_c(trades)
+    out = buf.getvalue()
+    assert "MIN_CONFIDENCE" in out and "MIN_EDGE" in out, out
+    assert "all 4 stacked" in out, out
+    # Confidence gate should flag "kills losers" here (removed_n=5 LOSS, kept=2 WIN)
+    assert "kills losers" in out, out
+
+
 def run() -> None:
     test_load_trades()
     test_gate_pass()
@@ -182,6 +214,7 @@ def run() -> None:
     test_trade_date_and_split()
     test_analysis_a_smoke()
     test_analysis_b_smoke()
+    test_analysis_c_smoke()
     print("PASS ✓ validate_gates pure fns")
 
 

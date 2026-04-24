@@ -138,10 +138,70 @@ def analysis_b(trades: list[dict]) -> None:
     print(_slice_line("test",  test))
 
 
+_COMBOS: list[tuple[str, set[str]]] = [
+    ("MIN_CONFIDENCE>=0.60",    {"min_confidence"}),
+    ("MIN_EDGE>=0.03",          {"min_edge"}),
+    ("TRADING_HOURS_BLOCK",     {"hours_block"}),
+    ("MIN_DELTA_PCT>=0.0002",   {"min_delta"}),
+    ("all 4 stacked",           set(GATES)),
+    ("MIN_CONFIDENCE+MIN_EDGE", {"min_confidence", "min_edge"}),
+    ("MIN_CONFIDENCE+HOURS",    {"min_confidence", "hours_block"}),
+    ("HOURS+MIN_DELTA",         {"hours_block", "min_delta"}),
+]
+
+
+def _signal_quality(removed_n: int, removed_wr: float, kept_wr: float) -> str:
+    if removed_n < 5:
+        return "?"
+    diff_pp = (kept_wr - removed_wr) * 100
+    if diff_pp > 5:
+        return "✅ kills losers"
+    if diff_pp < -5:
+        return "❌ kills winners"
+    return "⚠️ noisy"
+
+
+def analysis_c(trades: list[dict]) -> None:
+    print()
+    print("=== Analysis C: per-gate marginal attribution ===")
+    print(f"{'gate':<26} {'rem_n':>5}  {'rem_WR':>6}  {'kept_WR':>7}  {'ΔWR':>6}   signal")
+    print("-" * 80)
+    for label, active in _COMBOS:
+        kept    = [t for t in trades if     gate_pass(t, active=active)]
+        removed = [t for t in trades if not gate_pass(t, active=active)]
+        sk, sr  = summarize(kept), summarize(removed)
+        dwr_pp  = (sk["wr"] - sr["wr"]) * 100
+        quality = _signal_quality(sr["n"], sr["wr"], sk["wr"])
+        print(
+            f"{label:<26} {sr['n']:>5}  "
+            f"{sr['wr']*100:>5.1f}%  {sk['wr']*100:>6.1f}%  "
+            f"{dwr_pp:>+5.1f}pp  {quality}"
+        )
+
+
+def print_caveats() -> None:
+    print()
+    print("=== Caveats ===")
+    print("1. MIN_DELTA_PCT uses btc_close-btc_open (resolution delta), not entry-time")
+    print("   delta. This over-estimates trades the live gate would let through.")
+    print("2. MIN_EDGE reconstructs side_ask as entry_price + 0.01 (live does")
+    print("   target = ask - 0.01). ~1-cent error from reprice-loop staleness.")
+    print("3. Gates were derived from these same 166 trades. Analysis A is")
+    print("   self-consistent by construction. B is the only out-of-sample check.")
+    print("4. Apr 22-23 may be transient regime; n=52 is small. Re-run in 7 days.")
+
+
 def main() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     trades = load_trades(repo_root / "logs")
     print(f"Loaded {len(trades)} resolved trades")
+    print(f"Thresholds: MIN_CONFIDENCE={MIN_CONFIDENCE} MIN_EDGE={MIN_EDGE} "
+          f"HOURS_BLOCK={sorted(TRADING_HOURS_BLOCK) or 'off'} "
+          f"MIN_DELTA_PCT={MIN_DELTA_PCT}")
+    analysis_a(trades)
+    analysis_b(trades)
+    analysis_c(trades)
+    print_caveats()
 
 
 if __name__ == "__main__":
