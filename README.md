@@ -105,8 +105,7 @@ All settings live in `.env`. Below is a summary of the most important variables.
 | `MIN_BET_SIZE` / `MAX_BET_SIZE` | `1.0` / `5.0` | Per-trade size range |
 | `MIN_CONFIDENCE` | `0.50` | Skip if signal confidence below this |
 | `MIN_EDGE` | `0.02` | Required `confidence − ask` to enter |
-| `KELLY_FRACTION` | `0.25` | Fractional-Kelly multiplier (applies after warmup) |
-| `KELLY_ENABLE_AFTER` | `100` | Trades required before Kelly sizing kicks in |
+| `KELLY_FRACTION` | `0.25` | Fractional-Kelly multiplier (active from trade 1) |
 | `MAX_DAILY_DRAWDOWN` | `5.0` | Daily loss limit in USDC; halts trading for the day |
 | `MAX_CONSECUTIVE_LOSSES` | `5` | Loss streak that pauses trading |
 | `TRADING_HOURS_BLOCK` | _(empty)_ | Comma-separated UTC hours to block new entries (e.g. `0,2,3,20,21`) |
