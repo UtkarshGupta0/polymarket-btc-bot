@@ -71,7 +71,7 @@ def test_replay_single_window_winning_trade():
     prev = _set_cfg(
         min_confidence=0.50, min_edge=0.01, min_delta_pct=0.0,
         trading_hours_block=frozenset(),
-        starting_capital=30.0, kelly_enable_after=0,
+        starting_capital=30.0,
         max_consecutive_losses=10, max_daily_drawdown=100.0,
         min_reserve=5.0, kelly_fraction=0.25,
         min_bet_size=1.0, max_bet_size=5.0,
@@ -100,7 +100,7 @@ def test_replay_unfillable_when_no_fill_at_or_below_limit():
     prev = _set_cfg(
         min_confidence=0.50, min_edge=0.01, min_delta_pct=0.0,
         trading_hours_block=frozenset(),
-        starting_capital=30.0, kelly_enable_after=0,
+        starting_capital=30.0,
         max_consecutive_losses=10, max_daily_drawdown=100.0,
         min_reserve=5.0, kelly_fraction=0.25,
         min_bet_size=1.0, max_bet_size=5.0,
@@ -127,7 +127,7 @@ def test_frozen_clock_crosses_utc_midnight():
     prev = _set_cfg(
         min_confidence=0.50, min_edge=0.01, min_delta_pct=0.0,
         trading_hours_block=frozenset(),
-        starting_capital=30.0, kelly_enable_after=0,
+        starting_capital=30.0,
         max_consecutive_losses=10, max_daily_drawdown=100.0,
         min_reserve=5.0, kelly_fraction=0.25,
         min_bet_size=1.0, max_bet_size=5.0,
