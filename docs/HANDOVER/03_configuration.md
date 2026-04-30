@@ -49,15 +49,11 @@ Consecutive gate-fail reprice ticks before cancel. With `REPRICE_INTERVAL_SEC=5`
 
 ### `MIN_BET_SIZE` / `MAX_BET_SIZE` (defaults `1.0` / `5.0`)
 
-Dollar bounds on position size. `MIN_BET_SIZE` is the absolute floor (also used by flat-bet phase). `MAX_BET_SIZE` caps Kelly's suggestion. For a $30 bankroll, $5 max is ~17% per trade — already aggressive. Don't raise until bankroll is 10x this.
+Dollar bounds on position size. `MIN_BET_SIZE` is the absolute floor below which a Kelly result is rejected. `MAX_BET_SIZE` caps Kelly's suggestion. For a $30 bankroll, $5 max is ~17% per trade — already aggressive. Don't raise until bankroll is 10x this.
 
 ### `KELLY_FRACTION` (default `0.25`)
 
-Multiplier on theoretical Kelly. 1.0 = full Kelly (volatile); 0.25 = quarter-Kelly (industry-standard conservative). Only take effect after `KELLY_ENABLE_AFTER` resolved trades.
-
-### `KELLY_ENABLE_AFTER` (default `100`)
-
-Number of total resolved trades before Kelly replaces flat-bet sizing. The flat-bet phase validates the signal on identical variance. Don't lower this — Kelly compounds an unvalidated signal's errors brutally.
+Multiplier on theoretical Kelly. 1.0 = full Kelly (volatile); 0.25 = quarter-Kelly (industry-standard conservative). Active from trade 1.
 
 ### `MAX_DAILY_DRAWDOWN` (default `5.0`)
 
@@ -130,7 +126,6 @@ Used only by `self_improver.py` CLI. Not needed for bot runtime.
 | `MAX_DAILY_DRAWDOWN` | 5.0 | 3.0–10.0 (scale with capital) |
 | `MAX_CONSECUTIVE_LOSSES` | 5 | 3–7 |
 | `KELLY_FRACTION` | 0.25 | 0.10–0.40 |
-| `KELLY_ENABLE_AFTER` | 100 | 50–200 |
 
 Anything outside those ranges either has no effect (saturates against another gate) or enters undertested territory — run backtests first.
 
@@ -147,7 +142,6 @@ ENTRY_WINDOW_END=8
 MAX_DAILY_DRAWDOWN=5.0
 MAX_CONSECUTIVE_LOSSES=5
 KELLY_FRACTION=0.25
-KELLY_ENABLE_AFTER=100
 MIN_RESERVE=5.0
 REPRICE_INTERVAL_SEC=5
 GATE_ASK_MIN=0.15
