@@ -95,19 +95,8 @@ This is in `bot.py::_evaluate_entry`. The hysteresis (N=3 fails before cancel) w
 
 ## Sizing
 
-Two phases:
+All trades sized via fractional Kelly from trade 1. There is no separate flat-bet validation phase — `backtest_v2` is the validation surface.
 
-### Flat-bet validation phase (trades 1 to `KELLY_ENABLE_AFTER - 1`)
-
-```
-size = max(CONFIG.min_bet_size, round(5.0 * entry_price + 0.05, 2))
-```
-
-The `5.0 * entry_price + 0.05` ensures we buy at least `MIN_SHARE_SIZE = 5.0` shares (Polymarket's CLOB minimum) with a tiny safety margin. At $0.90 entry that's $4.55, capped below by `MIN_BET_SIZE=$1.00`. Default `KELLY_ENABLE_AFTER=100` — we validate the signal on identical-size bets before letting Kelly compound the variance.
-
-### Kelly phase (trades ≥ `KELLY_ENABLE_AFTER`)
-
-Classic fractional Kelly:
 ```
 b = (1 / entry_price) - 1         # profit/cost ratio at this price
 kelly_pct = (b*p - q) / b         # p=confidence, q=1-p
@@ -116,6 +105,10 @@ size = max(MIN_BET_SIZE, min(size, MAX_BET_SIZE))
 ```
 
 `KELLY_FRACTION=0.25` is a conservative multiplier on the theoretical Kelly optimal — full Kelly is over-aggressive in any real game because `p` is estimated, not known.
+
+After Kelly, the function checks `effective_shares = round(size / entry_price, 2)`. If `effective_shares < MIN_SHARE_SIZE` (Polymarket CLOB minimum, currently 5.0), the function returns 0 and emits a DEBUG log line. This makes the previously-silent executor reject visible: at small balances or high asks Kelly often produces fewer than 5 shares, and operators should see that explicitly rather than wonder why no trades are placing. Raise `STARTING_CAPITAL` or wait for cheaper asks to clear the threshold.
+
+Why no flat-bet phase: the original purpose was to validate the signal on identical-size bets before letting Kelly compound variance. `backtest_v2` now plays that role on historical data, and the live flat phase had a silent-failure bug (flat $1 × ask > 0.20 produced fewer than 5 shares and was rejected by the executor). See `docs/superpowers/specs/2026-04-27-kill-flat-bet-phase-design.md`.
 
 ## Risk gates
 
