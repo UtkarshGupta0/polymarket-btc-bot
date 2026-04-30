@@ -66,7 +66,6 @@ class Config:
     min_reserve: float
     kelly_fraction: float
     reprice_interval_sec: int
-    kelly_enable_after: int
 
     # Gates (dormant by default; enable via .env)
     min_edge: float
@@ -162,7 +161,6 @@ def load_config() -> Config:
         min_reserve=_get_float("MIN_RESERVE", 5.0),
         kelly_fraction=_get_float("KELLY_FRACTION", 0.25),
         reprice_interval_sec=_get_int("REPRICE_INTERVAL_SEC", 5),
-        kelly_enable_after=_get_int("KELLY_ENABLE_AFTER", 100),
         min_edge=_get_float("MIN_EDGE", 0.02),
         min_delta_pct=_get_float("MIN_DELTA_PCT", 0.0),
         trading_hours_block=_get_hours_block("TRADING_HOURS_BLOCK", frozenset()),
