@@ -227,53 +227,50 @@ def _snapshot(bot: "Bot") -> dict:
     st = bot.price_feed.state
     vwap_div = ((st.current_price - st.vwap) / st.vwap) if st.vwap > 0 else 0.0
 
+    # Compute a fresh signal — the current Bot doesn't expose `latest_signal`.
     sig = getattr(bot, "latest_signal", None)
+    if sig is None:
+        try:
+            from signal_engine import compute_signal
+            sig = compute_signal(st, window_end)
+        except Exception:
+            sig = None
+
     sig_payload = None
     gate = None
     if sig is not None:
-        # feature alignments recomputed cheaply from rationale components
-        from signal_engine import (
-            MOMENTUM_SCALE, VWAP_DIV_SCALE, VELOCITY_SCALE,
-            REALIZED_VOL_BASELINE, delta_confidence,
-        )
-        ddir = 1 if st.delta_from_open > 0 else (-1 if st.delta_from_open < 0 else 0)
-        def _clamp(v, lo, hi): return max(lo, min(hi, v))
-        mom_n = _clamp(st.momentum / MOMENTUM_SCALE, -1.0, 1.0)
-        vol_n = _clamp(st.volume_imbalance, -1.0, 1.0)
-        vwap_n = _clamp(vwap_div / VWAP_DIV_SCALE, -1.0, 1.0) if st.vwap > 0 else 0.0
-        vel_n = _clamp(st.delta_30s / VELOCITY_SCALE, -1.0, 1.0)
-        book_n = _clamp(st.book_imbalance, -1.0, 1.0)
-        base_delta = delta_confidence(st.delta_from_open_abs)
-        mom_align = mom_n * ddir if ddir != 0 else mom_n
-        vol_align = vol_n * ddir if ddir != 0 else vol_n
-        vwap_align = vwap_n * ddir if ddir != 0 else vwap_n
-        vel_align = vel_n * ddir if ddir != 0 else vel_n
-        book_align = book_n * ddir if ddir != 0 else book_n
-        # time boost
-        if sig.seconds_to_close <= 10:
-            tb = 1.25
-        elif sig.seconds_to_close <= 20:
-            tb = 1.15
-        elif sig.seconds_to_close <= 30:
-            tb = 1.08
-        else:
-            tb = 1.0
-        vm = _clamp(REALIZED_VOL_BASELINE / st.realized_vol, 0.85, 1.15) if st.realized_vol > 0 else 1.0
-        sig_payload = {
-            "direction": sig.direction,
-            "confidence": sig.confidence,
-            "suggested_price": sig.suggested_price,
-            "expected_value": sig.expected_value,
-            "seconds_to_close": sig.seconds_to_close,
-            "base_delta_conf": base_delta,
-            "mom_align": mom_align,
-            "vol_align": vol_align,
-            "vwap_align": vwap_align,
-            "vel_align": vel_align,
-            "book_align": book_align,
-            "time_boost": tb,
-            "vol_mult": vm,
-        }
+        try:
+            from signal_engine import (
+                MOMENTUM_SCALE, VWAP_DIV_SCALE, delta_confidence,
+            )
+            ddir = 1 if st.delta_from_open > 0 else (-1 if st.delta_from_open < 0 else 0)
+            def _clamp(v, lo, hi): return max(lo, min(hi, v))
+            mom_n = _clamp(st.momentum / MOMENTUM_SCALE, -1.0, 1.0)
+            vol_n = _clamp(getattr(st, "volume_imbalance", 0.0), -1.0, 1.0)
+            vwap_n = _clamp(vwap_div / VWAP_DIV_SCALE, -1.0, 1.0) if st.vwap > 0 else 0.0
+            base_delta = delta_confidence(st.delta_from_open_abs)
+            mom_align = mom_n * ddir if ddir != 0 else mom_n
+            vol_align = vol_n * ddir if ddir != 0 else vol_n
+            vwap_align = vwap_n * ddir if ddir != 0 else vwap_n
+            tb = 1.15 if sig.seconds_to_close <= 15 else (1.08 if sig.seconds_to_close <= 30 else 1.0)
+            sig_payload = {
+                "direction": sig.direction,
+                "confidence": sig.confidence,
+                "suggested_price": sig.suggested_price,
+                "expected_value": sig.expected_value,
+                "seconds_to_close": sig.seconds_to_close,
+                "base_delta_conf": base_delta,
+                "mom_align": mom_align,
+                "vol_align": vol_align,
+                "vwap_align": vwap_align,
+                "vel_align": 0.0,
+                "book_align": 0.0,
+                "time_boost": tb,
+                "vol_mult": 1.0,
+            }
+        except Exception as e:
+            logger.warning(f"sig_payload build error: {e}")
+            sig_payload = None
 
     mw = bot.current_window
     market_payload = None
@@ -322,13 +319,13 @@ def _snapshot(bot: "Bot") -> dict:
             "current_price": st.current_price,
             "window_open_price": st.window_open_price,
             "delta_from_open": st.delta_from_open,
-            "delta_30s": st.delta_30s,
+            "delta_30s": getattr(st, "delta_30s", 0.0),
             "vwap": st.vwap,
             "vwap_div": vwap_div,
             "momentum": st.momentum,
-            "volume_imbalance": st.volume_imbalance,
-            "book_imbalance": st.book_imbalance,
-            "realized_vol": st.realized_vol,
+            "volume_imbalance": getattr(st, "volume_imbalance", 0.0),
+            "book_imbalance": getattr(st, "book_imbalance", 0.0),
+            "realized_vol": getattr(st, "realized_vol", 0.0),
             "tick_count": st.tick_count,
         },
         "signal": sig_payload,

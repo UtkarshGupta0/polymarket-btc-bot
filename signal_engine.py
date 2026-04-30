@@ -1,6 +1,8 @@
 """Signal engine. PriceState -> Signal(direction, confidence, price)."""
 from __future__ import annotations
 
+import json
+import os
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -32,6 +34,10 @@ CONFIDENCE_CAP = 0.95
 # Normalization scales for alignment signals
 MOMENTUM_SCALE = 5.0        # $/tick that counts as "strong" momentum
 VWAP_DIV_SCALE = 0.0005     # 0.05% separation between price and vwap = strong
+
+# Time-boost coefficients (param_sweep mutates these)
+BOOST_30 = 1.08             # T-30s confidence multiplier
+BOOST_15 = 1.15             # T-15s confidence multiplier
 
 
 @dataclass
@@ -165,11 +171,12 @@ def compute_signal(
 
     # Time boost — closer to close = stronger
     if seconds_to_close <= 15:
-        confidence *= 1.15
+        confidence *= BOOST_15
     elif seconds_to_close <= 30:
-        confidence *= 1.08
+        confidence *= BOOST_30
 
     confidence = _clamp(confidence, 0.0, CONFIDENCE_CAP)
+    confidence = _apply_variant(confidence, state)
     suggested_price = confidence_to_price(confidence)
     ev = expected_value(confidence, suggested_price)
 
@@ -212,11 +219,82 @@ def gate_vs_market(signal: Signal, ask_up: float, ask_down: float) -> bool:
     ask = ask_up if signal.direction == "UP" else ask_down
     if ask <= 0:
         return False
-    if signal.confidence - ask < CONFIG.min_edge:
+    edge_threshold = _edge_threshold(signal.direction)
+    if signal.confidence - ask < edge_threshold:
         return False
     if abs(signal.window_delta) < CONFIG.min_delta_pct:
         return False
     return True
+
+
+# --- variant helpers ---
+
+_REMAP_CACHE: Optional[list[tuple[float, float, float]]] = None
+_REMAP_PATH_LOADED: Optional[str] = None
+
+
+def _load_remap() -> list[tuple[float, float, float]]:
+    """Load + cache the calibration remap. Returns list of (raw_lo, raw_hi, calibrated)."""
+    global _REMAP_CACHE, _REMAP_PATH_LOADED
+    path = CONFIG.confidence_remap_path
+    if not path:
+        return []
+    if _REMAP_CACHE is not None and _REMAP_PATH_LOADED == path:
+        return _REMAP_CACHE
+    if not os.path.isfile(path):
+        _REMAP_CACHE = []
+        _REMAP_PATH_LOADED = path
+        return _REMAP_CACHE
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        out = [(float(b["raw_lo"]), float(b["raw_hi"]), float(b["calibrated"]))
+               for b in data.get("buckets", [])]
+        out.sort(key=lambda r: r[0])
+        _REMAP_CACHE = out
+        _REMAP_PATH_LOADED = path
+        return _REMAP_CACHE
+    except Exception:
+        _REMAP_CACHE = []
+        _REMAP_PATH_LOADED = path
+        return _REMAP_CACHE
+
+
+def _remap_confidence(raw: float) -> float:
+    table = _load_remap()
+    if not table:
+        return raw
+    for lo, hi, cal in table:
+        if lo <= raw < hi:
+            return cal
+    # Fall through: use last bucket's calibrated value if raw >= hi of last
+    if raw >= table[-1][1]:
+        return table[-1][2]
+    if raw < table[0][0]:
+        return table[0][2]
+    return raw
+
+
+def _apply_variant(confidence: float, state: PriceState) -> float:
+    variant = CONFIG.signal_variant
+    if variant == "default" or variant == "asymmetric":
+        return confidence
+    if variant == "calibrated":
+        return _clamp(_remap_confidence(confidence), 0.0, CONFIDENCE_CAP)
+    if variant == "regime_filtered":
+        rv = getattr(state, "realised_vol", 0.0) or 0.0
+        if rv <= 0.0:
+            return confidence  # no info — pass through
+        if rv < CONFIG.vol_regime_min or rv > CONFIG.vol_regime_max:
+            return 0.0  # outside regime band → kill the signal
+        return confidence
+    return confidence
+
+
+def _edge_threshold(direction: str) -> float:
+    if CONFIG.signal_variant == "asymmetric":
+        return CONFIG.min_edge_up if direction == "UP" else CONFIG.min_edge_down
+    return CONFIG.min_edge
 
 
 # --- standalone test ---

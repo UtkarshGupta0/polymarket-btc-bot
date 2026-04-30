@@ -73,6 +73,14 @@ class Config:
     min_delta_pct: float
     trading_hours_block: frozenset[int]
 
+    # Signal variant + calibration (Phase E backtest_v2)
+    signal_variant: str  # "default" | "calibrated" | "regime_filtered" | "asymmetric"
+    confidence_remap_path: str
+    vol_regime_min: float
+    vol_regime_max: float
+    min_edge_up: float
+    min_edge_down: float
+
     # Telegram
     telegram_bot_token: str
     telegram_chat_id: str
@@ -102,6 +110,13 @@ class Config:
         for h in self.trading_hours_block:
             assert 0 <= h <= 23, \
                 f"TRADING_HOURS_BLOCK entries must be 0-23, got {h}"
+        assert self.signal_variant in (
+            "default", "calibrated", "regime_filtered", "asymmetric"
+        ), f"SIGNAL_VARIANT must be default|calibrated|regime_filtered|asymmetric, got {self.signal_variant!r}"
+        assert 0.0 <= self.vol_regime_min <= self.vol_regime_max, \
+            f"VOL_REGIME_MIN must be <= VOL_REGIME_MAX (got {self.vol_regime_min} / {self.vol_regime_max})"
+        assert 0 <= self.min_edge_up < 0.5 and 0 <= self.min_edge_down < 0.5, \
+            f"MIN_EDGE_UP/DOWN must be 0..0.5"
         if self.trading_mode == "live":
             assert self.polymarket_private_key, \
                 "POLYMARKET_PRIVATE_KEY required for live mode"
@@ -151,6 +166,12 @@ def load_config() -> Config:
         min_edge=_get_float("MIN_EDGE", 0.02),
         min_delta_pct=_get_float("MIN_DELTA_PCT", 0.0),
         trading_hours_block=_get_hours_block("TRADING_HOURS_BLOCK", frozenset()),
+        signal_variant=_get_str("SIGNAL_VARIANT", "default").lower(),
+        confidence_remap_path=_get_str("CONFIDENCE_REMAP_PATH", ""),
+        vol_regime_min=_get_float("VOL_REGIME_MIN", 0.0),
+        vol_regime_max=_get_float("VOL_REGIME_MAX", 1.0),
+        min_edge_up=_get_float("MIN_EDGE_UP", 0.02),
+        min_edge_down=_get_float("MIN_EDGE_DOWN", 0.02),
         telegram_bot_token=_get_str("TELEGRAM_BOT_TOKEN"),
         telegram_chat_id=_get_str("TELEGRAM_CHAT_ID"),
         anthropic_api_key=_get_str("ANTHROPIC_API_KEY"),

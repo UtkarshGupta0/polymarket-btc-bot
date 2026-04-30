@@ -60,9 +60,25 @@ class Bot:
         await self.market_finder.__aenter__()
         await self.telegram.startup(CONFIG.trading_mode, CONFIG.starting_capital)
 
+        # Dashboard at http://127.0.0.1:8787 (override port via DASHBOARD_PORT env)
+        import os
+        from dashboard import start_dashboard
+        dash_runner = None
+        try:
+            dash_runner = await start_dashboard(
+                self, port=int(os.environ.get("DASHBOARD_PORT", 8787))
+            )
+        except Exception as e:
+            logger.warning(f"dashboard failed to start: {e}")
+
         try:
             await self._trading_loop()
         finally:
+            if dash_runner is not None:
+                try:
+                    await dash_runner.cleanup()
+                except Exception:
+                    pass
             await self._shutdown()
 
     async def _wait_first_tick(self, timeout: float) -> None:
