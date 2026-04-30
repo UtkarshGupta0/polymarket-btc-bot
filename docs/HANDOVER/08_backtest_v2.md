@@ -153,7 +153,7 @@ implementation (existing tests stay green).
 * **Fees**: default `--fee 0` (parity with prior backtester). Run `--fee 0.002` to estimate the impact of Polymarket's current taker fee on payout.
 * **Survivorship**: the trades feed only contains markets that traded on chain. Markets with zero fills are dropped from the tape, biasing toward liquid windows.
 * **Volume imbalance**: still 0 in the synthesised PriceState (klines lack trade-direction). Live signal will diverge slightly.
-* **Real bot bug noted during testing**: `MIN_SHARE_SIZE = 5` (executor.py:14) combined with flat $1 sizing + entry prices > $0.20 means flat-bet phase often rejects orders silently. Backtest tests exercise the Kelly path (`KELLY_ENABLE_AFTER=0`) to avoid this. Worth fixing in the live bot separately.
+* **Bug found and fixed during testing**: `MIN_SHARE_SIZE = 5` × flat $1 sizing × entry prices > $0.20 caused the flat-bet phase to silently reject most orders. Fixed by removing the flat-bet phase entirely; see `docs/superpowers/specs/2026-04-27-kill-flat-bet-phase-design.md`. Backtest behavior is now identical to live (Kelly from trade 1).
 
 ## Findings + recommendation
 
@@ -181,7 +181,7 @@ This is consistent with the structural disadvantage the bot has — it reads a s
 
 ### Operational fixes worth doing regardless
 
-* **`MIN_SHARE_SIZE = 5` × flat $1 sizing × ask > 0.20 means flat-bet phase silently rejects every order.** Either lower `MIN_SHARE_SIZE`, raise the flat-bet target to `5 × ask`, or set `KELLY_ENABLE_AFTER=0` so Kelly takes over from trade 1. This is independent of the strategy question above and is a real bug.
+* **Flat-bet silent-reject bug — fixed.** `MIN_SHARE_SIZE = 5` × flat $1 × ask > 0.20 was silently rejecting every order in the flat-bet phase. Resolved by removing the flat-bet phase; sizing is now pure quarter-Kelly with an explicit too-small skip. See `docs/superpowers/specs/2026-04-27-kill-flat-bet-phase-design.md`.
 * **`apply_bt_config.py` is wired but the sweep winner from this run is the trivial config that produces no trades.** Re-run after a strategy redesign that actually beats the market.
 
 ### Per-bucket detail (loose-gate run, 7 trades)
