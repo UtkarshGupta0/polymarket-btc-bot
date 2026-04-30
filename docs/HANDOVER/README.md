@@ -46,7 +46,7 @@ Four things that are easy to get wrong and are load-bearing:
 
 3. **Paper mode holds through edge-loss by default.** `PAPER_HOLD_ON_EDGE_LOSS=1` suppresses both the N-strike cancel and the T-3s sweep. This collects honest P&L at resolution instead of synthetic cancels. Live mode must NOT run with this on. See [03_configuration.md](03_configuration.md#paper_hold_on_edge_loss).
 
-4. **The first 100 trades are flat-bet $1, then Kelly kicks in.** `risk_manager.calculate_position_size()` bypasses Kelly until `total_trades >= KELLY_ENABLE_AFTER`. This is the signal-validation phase — do not change it until the paper sample is statistically meaningful. See [02_strategy.md](02_strategy.md#sizing).
+4. **All trades sized by quarter-Kelly from trade 1.** `risk_manager.calculate_position_size()` returns 0 (with a DEBUG log) when Kelly produces fewer than `MIN_SHARE_SIZE` shares — the platform would reject those orders anyway. There is no flat-bet validation phase; `backtest_v2` plays that role on historical data. See [02_strategy.md](02_strategy.md#sizing).
 
 ## Current state (snapshot)
 
