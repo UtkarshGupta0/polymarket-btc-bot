@@ -174,18 +174,17 @@ def _simulate_pnl(picks: pd.DataFrame, starting_balance: float
 
         ep = float(r["entry_price"])
         conf = float(r["confidence"])
-        if total_trades < CONFIG.kelly_enable_after:
-            size = 1.0
-        else:
-            b = (1.0 / ep) - 1.0
-            if b <= 0:
-                continue
-            kelly_pct = max(0.0, (b * conf - (1 - conf)) / b)
-            available = max(0.0, bal - CONFIG.min_reserve)
-            size = min(CONFIG.max_bet_size, available * kelly_pct * CONFIG.kelly_fraction)
-            if size < CONFIG.min_bet_size:
-                continue
-            size = round(size, 2)
+        b = (1.0 / ep) - 1.0
+        if b <= 0:
+            continue
+        kelly_pct = max(0.0, (b * conf - (1 - conf)) / b)
+        if kelly_pct <= 0:
+            continue
+        available = max(0.0, bal - CONFIG.min_reserve)
+        size = min(CONFIG.max_bet_size, available * kelly_pct * CONFIG.kelly_fraction)
+        if size < CONFIG.min_bet_size:
+            continue
+        size = round(size, 2)
 
         shares = round(size / ep, 2)
         if shares < 5.0:
