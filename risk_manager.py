@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from config import CONFIG
+from executor import MIN_SHARE_SIZE
 
 logger = logging.getLogger(__name__)
 
@@ -80,23 +81,14 @@ class RiskManager:
     def calculate_position_size(self, confidence: float, entry_price: float) -> float:
         """Returns USDC size for the order. 0 if should skip.
 
-        Flat $1 for the first CONFIG.kelly_enable_after resolved trades
-        (signal validation phase). Kelly 0.25 thereafter.
+        Quarter-Kelly from trade 1. Explicit skip when Kelly produces
+        fewer than MIN_SHARE_SIZE shares at the given entry price (the
+        platform would reject the order anyway). The skip is logged at
+        DEBUG so operators can see it without noise at INFO.
         """
         if entry_price <= 0 or entry_price >= 1.0:
             return 0.0
 
-        # Flat-bet phase: fixed $1 while we validate the signal
-        if self.state.total_trades < CONFIG.kelly_enable_after:
-            b = (1.0 / entry_price) - 1.0
-            if b <= 0 or (b * confidence - (1.0 - confidence)) < 1e-9:
-                return 0.0
-            available = max(0.0, self.state.current_balance - CONFIG.min_reserve)
-            if available < 1.0:
-                return 0.0
-            return 1.0
-
-        # Kelly phase
         b = (1.0 / entry_price) - 1.0
         if b <= 0:
             return 0.0
@@ -113,7 +105,18 @@ class RiskManager:
         if size < CONFIG.min_bet_size:
             return 0.0
         size = min(size, CONFIG.max_bet_size)
-        return round(size, 2)
+        size = round(size, 2)
+
+        effective_shares = round(size / entry_price, 2)
+        if effective_shares < MIN_SHARE_SIZE:
+            logger.debug(
+                "size too small: kelly=$%.2f produces %.2f shares "
+                "< MIN_SHARE_SIZE=%.0f at entry $%.2f (conf=%.2f)",
+                size, effective_shares, MIN_SHARE_SIZE, entry_price, confidence,
+            )
+            return 0.0
+
+        return size
 
     # --- trade lifecycle ---
 
@@ -165,7 +168,7 @@ def _run_tests() -> None:
     print("RISK MANAGER TESTS")
     print("=" * 60)
 
-    rm = RiskManager(starting_balance=30.0)
+    rm = RiskManager(starting_balance=100.0)
 
     # Sizing: confidence high, price well below confidence (positive Kelly)
     size = rm.calculate_position_size(0.92, 0.88)
@@ -177,9 +180,8 @@ def _run_tests() -> None:
     print(f"size(conf=0.88, price=0.88) = ${size_neutral} (EV=0)")
     assert size_neutral == 0
 
-    # Sizing: max bet cap
+    # Sizing: max bet cap (Kelly is active from trade 1, no setup needed)
     rm2 = RiskManager(starting_balance=1000.0)
-    rm2.state.total_trades = CONFIG.kelly_enable_after
     size2 = rm2.calculate_position_size(0.95, 0.90)
     print(f"size(conf=0.95, price=0.90, bal=$1000) = ${size2} (capped at ${CONFIG.max_bet_size})")
     assert size2 == CONFIG.max_bet_size
@@ -220,6 +222,12 @@ def _run_tests() -> None:
     can, reason = rm6.can_trade()
     print(f"balance at reserve: can_trade={can} ({reason})")
     assert not can
+
+    # Sizing: too-small Kelly returns 0 (silent reject -> explicit skip)
+    rm_small = RiskManager(starting_balance=30.0)
+    size_small = rm_small.calculate_position_size(0.85, 0.80)
+    print(f"size(conf=0.85, price=0.80, bal=$30) = ${size_small} (Kelly < MIN_SHARE_SIZE)")
+    assert size_small == 0.0, f"expected 0 (too small), got {size_small}"
 
     print("\nAll risk tests PASS ✓")
 
