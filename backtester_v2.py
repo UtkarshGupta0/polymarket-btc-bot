@@ -573,7 +573,7 @@ def config_hash() -> str:
     keys = [
         "min_confidence", "min_edge", "min_delta_pct", "trading_hours_block",
         "entry_window_start", "entry_window_end", "kelly_fraction",
-        "kelly_enable_after", "max_bet_size", "min_bet_size",
+        "max_bet_size", "min_bet_size",
         "starting_capital", "signal_variant", "min_edge_up", "min_edge_down",
         "vol_regime_min", "vol_regime_max",
     ]
