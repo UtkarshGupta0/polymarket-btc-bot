@@ -79,6 +79,7 @@ class Config:
     vol_regime_max: float
     min_edge_up: float
     min_edge_down: float
+    contrarian_ask_threshold: float
 
     # Telegram
     telegram_bot_token: str
@@ -110,12 +111,14 @@ class Config:
             assert 0 <= h <= 23, \
                 f"TRADING_HOURS_BLOCK entries must be 0-23, got {h}"
         assert self.signal_variant in (
-            "default", "calibrated", "regime_filtered", "asymmetric"
-        ), f"SIGNAL_VARIANT must be default|calibrated|regime_filtered|asymmetric, got {self.signal_variant!r}"
+            "default", "calibrated", "regime_filtered", "asymmetric", "contrarian"
+        ), f"SIGNAL_VARIANT must be default|calibrated|regime_filtered|asymmetric|contrarian, got {self.signal_variant!r}"
         assert 0.0 <= self.vol_regime_min <= self.vol_regime_max, \
             f"VOL_REGIME_MIN must be <= VOL_REGIME_MAX (got {self.vol_regime_min} / {self.vol_regime_max})"
         assert 0 <= self.min_edge_up < 0.5 and 0 <= self.min_edge_down < 0.5, \
             f"MIN_EDGE_UP/DOWN must be 0..0.5"
+        assert 0.0 < self.contrarian_ask_threshold < 1.0, \
+            f"CONTRARIAN_ASK_THRESHOLD must be in (0, 1), got {self.contrarian_ask_threshold}"
         if self.trading_mode == "live":
             assert self.polymarket_private_key, \
                 "POLYMARKET_PRIVATE_KEY required for live mode"
@@ -170,6 +173,7 @@ def load_config() -> Config:
         vol_regime_max=_get_float("VOL_REGIME_MAX", 1.0),
         min_edge_up=_get_float("MIN_EDGE_UP", 0.02),
         min_edge_down=_get_float("MIN_EDGE_DOWN", 0.02),
+        contrarian_ask_threshold=_get_float("CONTRARIAN_ASK_THRESHOLD", 0.90),
         telegram_bot_token=_get_str("TELEGRAM_BOT_TOKEN"),
         telegram_chat_id=_get_str("TELEGRAM_CHAT_ID"),
         anthropic_api_key=_get_str("ANTHROPIC_API_KEY"),
