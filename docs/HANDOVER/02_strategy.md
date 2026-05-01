@@ -140,3 +140,10 @@ From the backtest suite and 33-trade paper sample:
 - **Higher confidence ≠ higher win rate.** The 80-90 bucket had 33% WR vs the 60-70 bucket at ~62%. There's a miscalibration cliff — likely overfitting on aligned features. A post-hoc derate on the 80+ bucket is a candidate improvement but not shipped.
 - **Post-filtering by `trend_alignment` magnitude isn't predictive.** Paper data showed `aln>+0.5` at 65% WR (good) but `aln<-0.5` at 57% WR (above chance) — the signal correctly catches some end-of-trend mean-reversion, so dropping contradicting-aln trades would cost trades without improving WR. Trend stays as a composite feature, not a filter.
 - **Kelly sizing on a signal with WR < 55% kills the bankroll.** The flat-bet validation phase exists because of this.
+
+## Contrarian-fade variant (backtest-only)
+
+There is a separate `SIGNAL_VARIANT=contrarian` path that does NOT use
+the composite directional signal at all. It reacts to extreme asks and
+buys the underdog flat-sized for measurement purposes. It is not wired
+into `bot.py`. See [09_contrarian_experiment.md](09_contrarian_experiment.md).
