@@ -35,10 +35,10 @@ import executor as _executor_mod
 import risk_manager as _risk_mod
 import signal_engine as _signal_mod
 from config import CONFIG
-from executor import PaperExecutor, Trade
+from executor import MIN_SHARE_SIZE, PaperExecutor, Trade
 from price_feed import PriceState
 from risk_manager import RiskManager
-from signal_engine import compute_signal, gate_vs_market
+from signal_engine import compute_contrarian_signal, compute_signal, gate_vs_market
 
 logger = logging.getLogger("backtester_v2")
 
@@ -262,6 +262,66 @@ class TradeRow:
     fillable: bool
 
 
+def _contrarian_tick(
+    *,
+    ex: PaperExecutor,
+    rm: RiskManager,
+    row,                                 # WindowRow
+    t: float,
+    state,                               # PriceState
+    ask_up: float,
+    ask_down: float,
+    sec_remaining: int,
+    ticks: list,
+    emit_ticks: bool,
+    fresh_up: bool,
+    fresh_down: bool,
+    minutes_completed: int,
+) -> None:
+    """One contrarian tick. No-op when a trade is already placed for this
+    window (first gate-pass wins). Otherwise computes the contrarian signal,
+    runs `can_trade()`, places a flat 5-share buy on the underdog at its
+    current ask, and registers it with the RiskManager."""
+    if ex.pending_trade(row.window_ts) is not None:
+        return
+
+    sig = compute_contrarian_signal(state, ask_up, ask_down)
+    if sig is None:
+        return
+
+    if emit_ticks:
+        ticks.append(TickRecord(
+            window_ts=row.window_ts, t=t,
+            confidence=sig.confidence, direction=sig.direction,
+            window_delta=sig.window_delta,
+            ask_up=ask_up, ask_down=ask_down,
+            fresh_up=fresh_up, fresh_down=fresh_down,
+            btc_close=row.btc_close,
+            minutes_completed=minutes_completed,
+        ))
+
+    can, _reason = rm.can_trade()
+    if not can:
+        return
+
+    target_price = sig.suggested_price
+    size = round(MIN_SHARE_SIZE * target_price, 2)
+    side_token = row.token_up if sig.direction == "UP" else row.token_down
+
+    trade = ex.place_order(
+        window_ts=row.window_ts,
+        direction=sig.direction,
+        confidence=sig.confidence,
+        entry_price=target_price,
+        size_usdc=size,
+        token_id=side_token,
+        btc_open=row.btc_open,
+        seconds_to_close=sec_remaining,
+    )
+    if trade is not None:
+        rm.on_trade_placed(trade.size_usdc)
+
+
 def replay(
     tape: list[WindowRow],
     starting_balance: Optional[float] = None,
@@ -305,12 +365,23 @@ def replay(
                 minutes_completed = max(1, min(5, (t - row.window_ts) // 60))
 
                 state = build_state(row, minutes_completed)
+                ask_up, fresh_up = ask_proxy_at(row.up_fills, t)
+                ask_down, fresh_down = ask_proxy_at(row.down_fills, t)
+
+                if CONFIG.signal_variant == "contrarian":
+                    _contrarian_tick(
+                        ex=ex, rm=rm, row=row, t=t, state=state,
+                        ask_up=ask_up, ask_down=ask_down,
+                        sec_remaining=sec_remaining, ticks=ticks,
+                        emit_ticks=emit_ticks,
+                        fresh_up=fresh_up, fresh_down=fresh_down,
+                        minutes_completed=minutes_completed,
+                    )
+                    continue
+
                 sig = compute_signal(state, window_end_ts, now=t)
                 if sig is None:
                     continue
-
-                ask_up, fresh_up = ask_proxy_at(row.up_fills, t)
-                ask_down, fresh_down = ask_proxy_at(row.down_fills, t)
 
                 if emit_ticks:
                     ticks.append(TickRecord(
