@@ -201,6 +201,53 @@ def compute_signal(
     )
 
 
+def compute_contrarian_signal(
+    state: PriceState,
+    ask_up: float,
+    ask_down: float,
+) -> Optional[Signal]:
+    """Contrarian fade: when one side's ask is at/above CONTRARIAN_ASK_THRESHOLD,
+    bet the underdog at its current ask. Returns None if neither side qualifies
+    or either ask is missing.
+
+    Distinct from `compute_signal` — does not predict direction from PriceState
+    features, only reacts to extreme mispricing on the order book.
+    """
+    threshold = CONFIG.contrarian_ask_threshold
+    if ask_up <= 0 or ask_down <= 0:
+        return None
+    if max(ask_up, ask_down) < threshold:
+        return None
+
+    if ask_up >= ask_down:
+        favourite_dir = "UP"
+        favourite_ask = ask_up
+        underdog_dir = "DOWN"
+        underdog_ask = ask_down
+    else:
+        favourite_dir = "DOWN"
+        favourite_ask = ask_down
+        underdog_dir = "UP"
+        underdog_ask = ask_up
+
+    suggested_price = max(0.02, round(underdog_ask, 2))
+    confidence = max(0.0, 1.0 - favourite_ask)
+
+    return Signal(
+        direction=underdog_dir,
+        confidence=confidence,
+        suggested_price=suggested_price,
+        rationale=(
+            f"contrarian: fav={favourite_dir}@{favourite_ask:.2f} "
+            f"-> bet underdog {underdog_dir} at {suggested_price:.2f}"
+        ),
+        timestamp=time.time(),
+        window_delta=state.delta_from_open,
+        seconds_to_close=0.0,
+        expected_value=0.0,
+    )
+
+
 def should_trade(signal: Signal) -> bool:
     if signal.confidence < CONFIG.min_confidence:
         return False
