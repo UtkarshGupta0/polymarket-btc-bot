@@ -38,7 +38,7 @@ Expected first-minute output: a config summary, a Binance WS connect line, a fir
 
 ## The non-obvious stuff
 
-Four things that are easy to get wrong and are load-bearing:
+Five things that are easy to get wrong and are load-bearing:
 
 1. **The gate is edge-based, not confidence-only.** A 70% confidence signal does not trigger a trade unless the opposite-side ask is cheap enough that `confidence - ask >= MIN_EDGE`. In an efficient market most fires *will* fail this gate — that is working correctly, not broken. See [02_strategy.md](02_strategy.md#the-edge-gate).
 
@@ -47,6 +47,8 @@ Four things that are easy to get wrong and are load-bearing:
 3. **Paper mode holds through edge-loss by default.** `PAPER_HOLD_ON_EDGE_LOSS=1` suppresses both the N-strike cancel and the T-3s sweep. This collects honest P&L at resolution instead of synthetic cancels. Live mode must NOT run with this on. See [03_configuration.md](03_configuration.md#paper_hold_on_edge_loss).
 
 4. **All trades sized by quarter-Kelly from trade 1.** `risk_manager.calculate_position_size()` returns 0 (with a DEBUG log) when Kelly produces fewer than `MIN_SHARE_SIZE` shares — the platform would reject those orders anyway. There is no flat-bet validation phase; `backtest_v2` plays that role on historical data. See [02_strategy.md](02_strategy.md#sizing).
+
+5. **Polymarket book-depth capture is run separately (Front 1A MVP).** The bot itself does not subscribe to book updates; the capture script `scripts/capture_polymarket_books.py` does, writing to `data/books/`. See [10_book_capture.md](10_book_capture.md).
 
 ## Current state (snapshot)
 
