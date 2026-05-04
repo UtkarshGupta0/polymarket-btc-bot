@@ -46,3 +46,39 @@ def test_filter_btc_5m_handles_missing_fields() -> None:
     ]
     out = filter_btc_5m(rows)
     assert out == []
+
+
+def test_parse_market_row_accepts_gamma_native_shape() -> None:
+    """Gamma /events returns slug+conditionId+clobTokenIds (JSON-encoded string)."""
+    row = {
+        "slug": "btc-updown-5m-1735689600",
+        "conditionId": "0xdef",
+        "clobTokenIds": '["111", "222"]',
+    }
+    m = parse_market_row(row)
+    assert m is not None
+    assert m.market_id == "0xdef"
+    assert m.slug == "btc-updown-5m-1735689600"
+    assert m.token_up == "111"
+    assert m.token_down == "222"
+
+
+def test_parse_market_row_handles_clob_token_ids_as_list() -> None:
+    """Defensive: some payloads may pre-decode clobTokenIds to a list."""
+    row = {
+        "slug": "btc-updown-5m-1735689600",
+        "conditionId": "0xfff",
+        "clobTokenIds": ["aaa", "bbb"],
+    }
+    m = parse_market_row(row)
+    assert m is not None
+    assert m.token_up == "aaa" and m.token_down == "bbb"
+
+
+def test_parse_market_row_rejects_malformed_clob_token_ids() -> None:
+    row = {
+        "slug": "btc-updown-5m-1735689600",
+        "conditionId": "0x1",
+        "clobTokenIds": "not-json",
+    }
+    assert parse_market_row(row) is None

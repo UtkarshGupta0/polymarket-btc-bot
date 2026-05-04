@@ -1,22 +1,29 @@
 """Polymarket WebSocket book-channel client.
 
-Schema reference (best guess; iterate via `--dump-raw` if wrong):
+Confirmed schema (validated via Task 6 smoke test):
 
-    Subscribe frame  (we send):
+    Subscribe frame  (we send, ONCE per connection):
         {"type": "MARKET", "assets_ids": ["<token_id>", ...]}
 
-    Book event       (we receive):
+    NOTE: Polymarket's WS rejects any second subscribe on the same socket
+    with "INVALID OPERATION". To add or drop assets we must reconnect.
+
+    Book event (initial snapshot, arrives as a JSON ARRAY of these):
         {
             "event_type": "book",
-            "asset_id": "<token_id>",
-            "market":   "<condition_id>",
-            "timestamp": "<unix_ms_str>",
-            "bids":     [{"price": "0.92", "size": "50"}, ...],
-            "asks":     [{"price": "0.94", "size": "30"}, ...]
+            "asset_id":   "<token_id>",
+            "market":     "<condition_id>",
+            "timestamp":  "<unix_ms_str>",
+            "hash":       "...",
+            "bids":       [{"price": "0.92", "size": "50"}, ...],
+            "asks":       [{"price": "0.94", "size": "30"}, ...],
+            "tick_size":  "0.001",
+            "last_trade_price": "0.97"
         }
 
-    Other event_type values ("trade", "price_change", ...) are dropped
-    by parse_book_frame for the MVP.
+    Subsequent book updates arrive as a SINGLE-OBJECT frame with the same
+    fields. price_change / last_trade_price events use different shapes
+    and are dropped by parse_book_frame (event_type != "book").
 """
 from __future__ import annotations
 
@@ -108,6 +115,35 @@ class BookWSClient:
         msg = {"type": "MARKET", "assets_ids": list(asset_ids)}
         await ws.send(json.dumps(msg))
 
+    def _apply_op(self, op: str, asset_id: str) -> bool:
+        """Update _subscribed in place; return True if the set changed."""
+        if op == "add" and asset_id not in self._subscribed:
+            self._subscribed.add(asset_id)
+            return True
+        if op == "remove" and asset_id in self._subscribed:
+            self._subscribed.discard(asset_id)
+            return True
+        return False
+
+    async def _drain_pending_subs(
+        self,
+        sub_queue: "asyncio.Queue[tuple[str, str]]",
+        debounce_sec: float,
+    ) -> None:
+        """Wait briefly for an initial burst of sub_queue ops, drain them all."""
+        try:
+            op, asset_id = await asyncio.wait_for(sub_queue.get(), timeout=debounce_sec)
+        except asyncio.TimeoutError:
+            return
+        self._apply_op(op, asset_id)
+        # Drain any further immediately-available items
+        while True:
+            try:
+                op, asset_id = sub_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                return
+            self._apply_op(op, asset_id)
+
     async def run(
         self,
         registry: dict[str, MarketInfo],
@@ -115,17 +151,31 @@ class BookWSClient:
     ) -> AsyncIterator[BookEvent]:
         """Connect, subscribe, yield BookEvents. Reconnects forever.
 
-        sub_queue carries ("add", asset_id) and ("remove", asset_id) tuples
-        emitted by discovery_loop.
+        Polymarket's market-channel WS only accepts ONE subscribe per
+        connection. We therefore:
+          1. On connect, briefly debounce the sub_queue to absorb any burst
+             of pending add/remove ops from discovery_loop.
+          2. Send a single batch subscribe with the full _subscribed set.
+          3. While streaming, any further sub_queue op closes the socket and
+             triggers an outer-loop reconnect (which re-runs the batch).
         """
         backoff = 1.0
         while True:
             try:
+                # If registry already has assets but _subscribed is empty
+                # (e.g. first connect after an unclean reset), seed from queue.
+                if not self._subscribed:
+                    await self._drain_pending_subs(sub_queue, debounce_sec=1.0)
                 async with websockets.connect(self._url, ping_interval=30) as ws:
                     if self._subscribed:
                         await self._subscribe(ws, self._subscribed)
+                        logger.info(
+                            "ws connected + subscribed (%d assets): %s",
+                            len(self._subscribed), self._url,
+                        )
+                    else:
+                        logger.info("ws connected (no assets yet): %s", self._url)
                     backoff = 1.0
-                    logger.info("ws connected: %s", self._url)
                     async for ev in self._stream(ws, registry, sub_queue):
                         yield ev
             except (ConnectionClosed, OSError, asyncio.TimeoutError) as e:
@@ -170,14 +220,21 @@ class BookWSClient:
                     recv_task = asyncio.create_task(ws.recv())
                 if sub_task in done:
                     op, asset_id = sub_task.result()
-                    if op == "add" and asset_id not in self._subscribed:
-                        self._subscribed.add(asset_id)
-                        await self._subscribe(ws, [asset_id])
-                        logger.info("ws subscribed: %s", asset_id)
-                    elif op == "remove" and asset_id in self._subscribed:
-                        self._subscribed.discard(asset_id)
-                        # Polymarket has no per-asset unsub; rely on resubscribe-on-reconnect to drop.
-                        logger.info("ws unsubscribe-pending: %s", asset_id)
+                    changed = self._apply_op(op, asset_id)
+                    # Drain any further queued ops without blocking
+                    while True:
+                        try:
+                            op2, aid2 = sub_queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
+                        changed = self._apply_op(op2, aid2) or changed
+                    if changed:
+                        logger.info(
+                            "ws subscription set changed (now %d assets); reconnecting",
+                            len(self._subscribed),
+                        )
+                        await ws.close()
+                        return
                     sub_task = asyncio.create_task(sub_queue.get())
         finally:
             if not recv_task.done(): recv_task.cancel()
