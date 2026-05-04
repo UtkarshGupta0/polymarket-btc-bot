@@ -81,17 +81,19 @@ async def writer_loop(
     """Drain event queue, append to writer, log heartbeat every N events."""
     n = 0
     started = time.time()
-    while not stop.is_set():
-        try:
-            ev = await asyncio.wait_for(event_queue.get(), timeout=1.0)
-        except asyncio.TimeoutError:
-            continue
-        writer.append(ev)
-        n += 1
-        if n % LOG_EVERY_N_EVENTS == 0:
-            uptime = time.time() - started
-            logger.info("events_written=%d uptime_sec=%.1f", n, uptime)
-    writer.close()
+    try:
+        while not stop.is_set():
+            try:
+                ev = await asyncio.wait_for(event_queue.get(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
+            writer.append(ev)
+            n += 1
+            if n % LOG_EVERY_N_EVENTS == 0:
+                uptime = time.time() - started
+                logger.info("events_written=%d uptime_sec=%.1f", n, uptime)
+    finally:
+        writer.close()
 
 
 async def ws_runner(
@@ -108,17 +110,17 @@ async def ws_runner(
         await event_queue.put(ev)
 
 
-async def main_async(args) -> int:
+async def main_async(args: argparse.Namespace) -> int:
     registry: dict[str, MarketInfo] = {}
-    sub_queue: asyncio.Queue = asyncio.Queue()
-    event_queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
+    sub_queue: "asyncio.Queue[tuple[str, str]]" = asyncio.Queue()
+    event_queue: "asyncio.Queue[BookEvent]" = asyncio.Queue(maxsize=10000)
     stop = asyncio.Event()
 
     def _handle_stop(signame: str) -> None:
         logger.info("received %s; stopping", signame)
         stop.set()
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     for sig in ("SIGINT", "SIGTERM"):
         loop.add_signal_handler(getattr(signal, sig), _handle_stop, sig)
 
