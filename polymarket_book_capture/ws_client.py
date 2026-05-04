@@ -23,10 +23,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import AsyncIterator, Iterable, Optional
+import os
+from typing import Any, AsyncIterator, Iterable, Optional, Union
 
 import websockets
-from websockets import WebSocketClientProtocol
 from websockets.exceptions import ConnectionClosed
 
 from polymarket_book_capture.schema import BookEvent, BookLevel, MarketInfo
@@ -93,10 +93,18 @@ class BookWSClient:
         self._subscribed: set[str] = set()
         self._raw_dump_fh = None  # set by .enable_raw_dump(path)
 
-    def enable_raw_dump(self, path) -> None:
+    def enable_raw_dump(self, path: Union[str, os.PathLike]) -> None:
         self._raw_dump_fh = open(path, "a", encoding="utf-8")
 
-    async def _subscribe(self, ws: WebSocketClientProtocol, asset_ids: Iterable[str]) -> None:
+    def close(self) -> None:
+        """Close the raw-dump file handle if one was opened. Idempotent."""
+        if self._raw_dump_fh is not None:
+            try:
+                self._raw_dump_fh.close()
+            finally:
+                self._raw_dump_fh = None
+
+    async def _subscribe(self, ws: Any, asset_ids: Iterable[str]) -> None:
         msg = {"type": "MARKET", "assets_ids": list(asset_ids)}
         await ws.send(json.dumps(msg))
 
@@ -127,7 +135,7 @@ class BookWSClient:
 
     async def _stream(
         self,
-        ws: WebSocketClientProtocol,
+        ws: Any,
         registry: dict[str, MarketInfo],
         sub_queue: "asyncio.Queue[tuple[str, str]]",
     ) -> AsyncIterator[BookEvent]:
