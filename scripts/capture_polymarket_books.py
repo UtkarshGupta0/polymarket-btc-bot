@@ -136,10 +136,13 @@ async def main_async(args: argparse.Namespace) -> int:
         asyncio.create_task(writer_loop(writer, event_queue, stop)),
     ]
 
-    await stop.wait()
-    for t in tasks:
-        t.cancel()
-    await asyncio.gather(*tasks, return_exceptions=True)
+    try:
+        await stop.wait()
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+    finally:
+        client.close()
     return 0
 
 

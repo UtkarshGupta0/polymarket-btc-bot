@@ -3,6 +3,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
+from typing import Literal
+
+
+Side = Literal["UP", "DOWN"]
 
 
 @dataclass(frozen=True)
@@ -16,7 +20,7 @@ class BookEvent:
     ts: float                       # unix-epoch seconds, fractional
     market_id: str                  # Polymarket condition_id (hex)
     token_id: str                   # outcome ERC-1155 token id (decimal string)
-    side: str                       # "UP" | "DOWN"
+    side: Side                      # "UP" if token_id == market.token_up else "DOWN"
     btc_window_ts: int              # parsed from slug suffix; identifies the 5-min window
     bids: list[BookLevel]
     asks: list[BookLevel]

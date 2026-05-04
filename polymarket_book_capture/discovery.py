@@ -109,7 +109,9 @@ async def _fetch_event_by_slug(
     url = f"{CONFIG.gamma_api_url}/events"
     params = {"slug": slug, "limit": "1"}
     try:
-        async with session.get(url, params=params, timeout=15) as resp:
+        async with session.get(
+            url, params=params, timeout=aiohttp.ClientTimeout(total=15),
+        ) as resp:
             resp.raise_for_status()
             payload = await resp.json()
     except Exception as e:
